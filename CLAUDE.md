@@ -102,6 +102,8 @@ The maintainer just runs `./telegradam.sh`, which walks through all of this. Ind
 
 ## Don't
 - Don't move secrets out of `config.toml` into a repo or anywhere shared.
+- Don't automate the my.telegram.org key step (no official API — scraping their auth
+  portal is fragile and risks the owner's account). The human/browser step is deliberate.
 - Don't replace launchd with a long-running daemon (it won't survive the Mac sleeping).
 - Don't edit the `.py` files for routine changes — change `config.toml` instead.
 
