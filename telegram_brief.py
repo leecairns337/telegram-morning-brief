@@ -468,7 +468,8 @@ _NOISE_LINE_RE = re.compile(
     r"^\s*(place|date|time|coordinates|geolocation|squad|source|map)\s*:|"
     r"\boriginal msg\b|\bsupport us\b|"
     r"boost the channel|subscribe|follow us|watch here|"
-    r"\|\s*(socials|donate|advertising|boost)|@\w+\s*\|",
+    r"\|\s*(socials|donate|advertising|boost)|@\w+\s*\||"
+    r"^\s*@\w+\s*[,:;|—–-]",       # "@channel — slogan" signature lines
     re.IGNORECASE,
 )
 
@@ -477,9 +478,12 @@ def _strip_noise_lines(text):
     """Drop footer/plug/metadata lines from a message before it's read aloud.
     If everything matched (it was ALL furniture), keep the original rather
     than return nothing."""
-    # Symbols first: a leading emoji/flag would otherwise defeat the anchored
-    # patterns below (newlines survive _strip_symbols, so line structure holds).
+    # Symbols and markdown marks first: a leading emoji or "__bold__" wrapper
+    # would otherwise defeat the anchored patterns below (and `_` is a word
+    # character, so \W doesn't skip it). Newlines survive both, so the
+    # line-by-line rules still work.
     text = _strip_symbols(text)
+    text = re.sub(r"[*_`]{2,}", "", text)
     # "Fwd from @channel" is a PREFIX, not always its own line — some channels
     # glue it to the story title, so cut the prefix instead of the whole line.
     text = re.sub(r"^\W*fwd from\s+@?\S*\s*", "", text, flags=re.IGNORECASE)
