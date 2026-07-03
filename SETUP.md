@@ -130,6 +130,19 @@ said — then check their Saved Messages for the audio.
   `python3 install_schedule.py`.
 - After any change, `python3 telegram_brief.py --check` confirms it's still healthy.
 
+## Maintenance (occasional — only when you're at the machine)
+Nothing auto-updates, deliberately: an unattended machine wants stability, and
+even a broken Ollama only degrades the brief to the rule-based digest, never
+kills it. Every month or three, while you're there anyway:
+```
+git pull                                       # update this tool
+brew upgrade ollama && brew services restart ollama
+ollama pull gemma2:9b                          # refresh the model if upstream changed
+.venv/bin/python3 telegram_brief.py --check    # confirm everything is still green
+```
+Never update anything remotely the evening before you can't be reached —
+do it when you could fix a surprise.
+
 ## Notes
 - **Cost:** free. No API keys to fund — the voice and the summary both run on the laptop.
 - **If it breaks:** you'll get the ⚠️ alert (prefixed with that machine's `name`).
