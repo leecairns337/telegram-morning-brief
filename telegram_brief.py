@@ -477,9 +477,12 @@ def _strip_noise_lines(text):
     """Drop footer/plug/metadata lines from a message before it's read aloud.
     If everything matched (it was ALL furniture), keep the original rather
     than return nothing."""
+    # Symbols first: a leading emoji/flag would otherwise defeat the anchored
+    # patterns below (newlines survive _strip_symbols, so line structure holds).
+    text = _strip_symbols(text)
     # "Fwd from @channel" is a PREFIX, not always its own line — some channels
     # glue it to the story title, so cut the prefix instead of the whole line.
-    text = re.sub(r"^\s*fwd from\s+@?\S*\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^\W*fwd from\s+@?\S*\s*", "", text, flags=re.IGNORECASE)
     kept = [ln for ln in text.splitlines() if not _NOISE_LINE_RE.search(ln)]
     out = "\n".join(kept).strip()
     return out if out else text
@@ -519,6 +522,7 @@ def select_relevant(items, summary_cfg):
             "  - sport, football, entertainment, celebrity, protests at games\n"
             "  - reactions, condemnations and 'X said' takes that report no new event\n"
             "  - memes, stunts, trivia, weather, local crime, promos\n"
+            "  - captions to a video or photo, strings of quotes, slogans, viral clips\n"
             "If you are unsure whether a message reports a real event, EXCLUDE it.\n\n"
         )
 
@@ -526,6 +530,9 @@ def select_relevant(items, summary_cfg):
         focus_txt
         + "From the numbered messages above, choose only the ones that pass the relevance "
         "test and group those reporting the SAME event together (to collapse duplicates).\n"
+        "Only choose messages whose text is a COMPLETE, SELF-CONTAINED news report — it "
+        "will be READ ALOUD with no image or video, so quote-fragments, captions and "
+        "one-liners that need the attached media make no sense. Skip those entirely.\n"
         "Within each group, put FIRST the number of the message that most factually and "
         "completely states the event (never a promo, schedule or link roundup).\n"
         "Output JSON ONLY, no prose: a list of groups, each group a list of message "
