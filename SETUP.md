@@ -73,6 +73,7 @@ Open `config.toml` in any text editor and set:
 - **[channels]** their news sources (@handles for public, exact titles for private)
 - **[credentials]** Telegram api_id/api_hash from https://my.telegram.org — log in
   there with *the owner's* phone number. Get a fresh pair per person.
+  (Click-by-click walkthrough: README, "Step 1 — Get your Telegram API key".)
 - **[schedule]** the `scrape_time`, and `lid_closed = true` only if they shut the lid
 - **[voice]** optionally a nicer `say_voice` (see below) and speaking `rate`
 - **[summary]** the `focus` list — what counts as news worth reading out
