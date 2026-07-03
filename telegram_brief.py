@@ -27,6 +27,7 @@ import re
 import subprocess
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -140,9 +141,27 @@ def _normalize_punct(s):
     """Make punctuation speakable (used on everything that reaches the voice)."""
     s = re.sub(r"(?<=\d)\s*[–—-]\s*(?=\d)", " to ", s)   # 700–800 -> "700 to 800"
     s = s.translate(_PUNCT_MAP)
-    s = re.sub(r"\s+,", ",", s)                          # "word ," -> "word,"
+    s = re.sub(r"[‼⁉⁈]", "!", s)                         # say names these aloud
+    s = re.sub(r"\s+([,!])", r"\1", s)                  # "word ," -> "word,"
     s = re.sub(r",(?:\s*,)+", ",", s)                    # collapse comma runs
     return s
+
+
+def _strip_symbols(s):
+    """Remove emoji and EVERY other symbol-class character the voice would
+    read out by name (\u25b6, \u25fe, \u3297 ...). Filtering by Unicode category
+    rather than code-point ranges means new symbol blocks can't slip through.
+    ASCII always passes; degree/plus-minus/times/divide and currency signs are
+    kept (`say` reads them sensibly). Unicode files a few geometric shapes
+    under Sm (math), hence its inclusion in the strip set."""
+    s = _EMOJI_RE.sub("", s)
+    return "".join(
+        ch for ch in s
+        if ord(ch) < 128
+        or ch in "\u00b0\u00b1\u00d7\u00f7"          # degree, plus-minus, times, divide
+        or (ch not in "\u200d\ufe0e"                   # ZWJ, text-style selector
+            and unicodedata.category(ch) not in ("So", "Sk", "Sm", "Cs", "Co", "Cn"))
+    )
 
 
 def _for_speech(s):
@@ -152,7 +171,7 @@ def _for_speech(s):
     s = re.sub(r"\[([^\]]+)\]\(", r"\1", s)          # half-open [text]( -> text
     s = re.sub(r"https?://\S+", "", s)               # bare URLs
     s = re.sub(r"#\w+", "", s)                       # hashtags, word and all
-    s = _EMOJI_RE.sub("", s)                         # emoji (see above)
+    s = _strip_symbols(s)                            # emoji + all symbol chars
     s = _normalize_punct(s)
     s = re.sub(r"[*_`#>]+", "", s)                   # markdown emphasis/heading marks
     s = re.sub(r"[\[\]()]", "", s)                   # leftover brackets
@@ -333,7 +352,7 @@ def _clean_spoken(text):
     if not lines or not lines[0].lower().startswith("good morning"):
         lines.insert(0, "Good morning. Here's what came in overnight.")
     text = "\n".join(lines)
-    text = _EMOJI_RE.sub("", _normalize_punct(text))   # model output can carry these too
+    text = _strip_symbols(_normalize_punct(text))      # model output can carry these too
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
@@ -447,7 +466,7 @@ def _looks_promo(text):
 # geolocation map cards ("Coordinates: 50.93284,34.81981" read digit by digit).
 _NOISE_LINE_RE = re.compile(
     r"^\s*(place|date|time|coordinates|geolocation|squad|source|map)\s*:|"
-    r"^\s*fwd from\b|\boriginal msg\b|\bsupport us\b|"
+    r"\boriginal msg\b|\bsupport us\b|"
     r"boost the channel|subscribe|follow us|watch here|"
     r"\|\s*(socials|donate|advertising|boost)|@\w+\s*\|",
     re.IGNORECASE,
@@ -458,6 +477,9 @@ def _strip_noise_lines(text):
     """Drop footer/plug/metadata lines from a message before it's read aloud.
     If everything matched (it was ALL furniture), keep the original rather
     than return nothing."""
+    # "Fwd from @channel" is a PREFIX, not always its own line — some channels
+    # glue it to the story title, so cut the prefix instead of the whole line.
+    text = re.sub(r"^\s*fwd from\s+@?\S*\s*", "", text, flags=re.IGNORECASE)
     kept = [ln for ln in text.splitlines() if not _NOISE_LINE_RE.search(ln)]
     out = "\n".join(kept).strip()
     return out if out else text
