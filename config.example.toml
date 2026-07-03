@@ -1,0 +1,87 @@
+# ===========================================================
+#  Morning Brief — settings.  THIS is the only file you edit.
+#
+#  New machine? Copy this template first:
+#      cp config.example.toml config.toml
+#  then fill in [channels], [credentials] and [alerts] below.
+#  After changing anything, see the note at the bottom.
+# ===========================================================
+
+[channels]
+#   Public channels  -> use the @handle
+#   Private groups   -> use the exact group title, in quotes
+# At least one entry is required — the brief refuses to run with an empty list.
+# (Advanced: ["*"] reads EVERY chat on the account, personal ones included.)
+follow = [
+  # "@somenewschannel",
+  # "Exact Private Group Title",
+]
+
+[schedule]
+scrape_time    = "03:40"   # 24-hour HH:MM — when the brief is built and sent
+lookback_hours = 8         # how far back to read (8h ≈ 8pm to 4am)
+lid_closed     = false     # set true ONLY if the laptop lid is shut overnight
+
+[voice]
+# Built-in macOS voice (free). Leave "" for the system default, or set a name.
+# List installed voices in Terminal with:  say -v '?'
+# Higher-quality voices: System Settings > Accessibility > Spoken Content >
+# System Voice > Manage Voices, then pick an (Enhanced) or (Premium) one.
+say_voice = ""
+rate      = 175    # speaking speed in words per minute (slower 150, faster 200)
+
+[summary]
+# Local AI summary via Ollama (free, runs on this Mac). Needs Ollama installed:
+#     brew install ollama && brew services start ollama && ollama pull gemma2:9b
+# If the Ollama server isn't reachable, the brief falls back to the rule-based
+# [digest] below. Set enabled = false to skip the AI entirely.
+enabled       = true
+# "extractive" = the AI only SELECTS and groups real messages; the brief reads the
+#   actual message text, so the AI cannot invent facts (most faithful — recommended).
+# "synthesis"  = the AI writes its own prose summary (smoother, but can fabricate).
+mode          = "extractive"
+max_groups    = 12                          # extractive: max number of stories read out
+model         = "gemma2:9b"                 # an installed Ollama model (see: ollama list)
+ollama_host   = "http://127.0.0.1:11434"    # default local Ollama address
+startup_wait_s = 90                         # wait this long for the server to wake/start
+
+# Only include stories that bear on these areas. Edit the list to change what
+# counts as important; everything else (trivia, memes, local crime, celebrity,
+# sport, weather) is left out of the brief. Leave the list empty [] to include
+# everything.
+focus = [
+  # "the Russia-Ukraine war and anything affecting it",
+]
+
+[digest]
+# Fallback only — used when the AI summary is off or Ollama is unreachable.
+# Assembled by simple rules (no AI): headline of each message, deduped, capped.
+style          = "headlines"  # "headlines" = first line of each message; "full" = whole message
+max_items      = 25           # cap: at most this many items are read aloud (most recent kept)
+headline_chars = 220          # for "headlines", trim each item to about this many characters
+
+[credentials]
+# Telegram: https://my.telegram.org  ->  "API development tools" — log in there
+# with the phone number of the account that will RECEIVE the brief.
+# Get a fresh pair per person/machine; don't reuse someone else's.
+telegram_api_id   = 0
+telegram_api_hash = ""
+
+[alerts]
+# The maintainer's Telegram @username — gets a message if a morning ever fails.
+# Leave as "" to switch off.
+parent_alert_to = ""
+# A short name for this machine/person (e.g. "Sam") — put at the front of
+# every alert so you can tell WHICH Mac is talking when several run this.
+name = ""
+# Also send a short "all good" ping every successful morning. If a ping ever
+# fails to arrive, something is wrong — even an expired login (which can't
+# send a failure alert) shows up as a MISSING heartbeat. Recommended on.
+daily_heartbeat = true
+
+# -----------------------------------------------------------
+# After editing:
+#   • changed channels / voice / keys  -> nothing else to do
+#   • changed scrape_time or lid_closed -> re-run:  python3 install_schedule.py
+# Sanity-check any change with:  python3 telegram_brief.py --check
+# -----------------------------------------------------------

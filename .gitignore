@@ -1,0 +1,21 @@
+# Secrets and login — NEVER commit or sync these
+config.toml
+*.session
+*.session-journal
+
+# Generated at runtime
+brief.m4a
+brief.mp3
+brief.txt
+*.aiff
+run.log
+run.err
+
+# Local-only notes and Claude Code settings (may hold personal details)
+memory/
+.claude/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
