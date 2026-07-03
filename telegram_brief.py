@@ -124,6 +124,27 @@ _EMOJI_RE = re.compile(
 )
 
 
+# Straighten typographic punctuation and turn separator glyphs into commas:
+# the voice pauses naturally at a comma, but stumbles or goes silent on
+# em-dashes, pipes and bullets.
+_PUNCT_MAP = str.maketrans({
+    "“": '"', "”": '"', "„": '"', "«": '"', "»": '"',
+    "‘": "'", "’": "'", "‚": "'",
+    "—": ",", "–": ",", "…": ",",
+    "|": ",", "•": ",", "·": ",", "~": "",
+    " ": " ",
+})
+
+
+def _normalize_punct(s):
+    """Make punctuation speakable (used on everything that reaches the voice)."""
+    s = re.sub(r"(?<=\d)\s*[–—-]\s*(?=\d)", " to ", s)   # 700–800 -> "700 to 800"
+    s = s.translate(_PUNCT_MAP)
+    s = re.sub(r"\s+,", ",", s)                          # "word ," -> "word,"
+    s = re.sub(r",(?:\s*,)+", ",", s)                    # collapse comma runs
+    return s
+
+
 def _for_speech(s):
     """Tidy a snippet for the TTS voice: strip markdown links, URLs, hashtags,
     stray markdown punctuation and emoji, then collapse whitespace."""
@@ -132,6 +153,7 @@ def _for_speech(s):
     s = re.sub(r"https?://\S+", "", s)               # bare URLs
     s = re.sub(r"#\w+", "", s)                       # hashtags, word and all
     s = _EMOJI_RE.sub("", s)                         # emoji (see above)
+    s = _normalize_punct(s)
     s = re.sub(r"[*_`#>]+", "", s)                   # markdown emphasis/heading marks
     s = re.sub(r"[\[\]()]", "", s)                   # leftover brackets
     s = re.sub(r"\s+", " ", s)
@@ -311,6 +333,7 @@ def _clean_spoken(text):
     if not lines or not lines[0].lower().startswith("good morning"):
         lines.insert(0, "Good morning. Here's what came in overnight.")
     text = "\n".join(lines)
+    text = _EMOJI_RE.sub("", _normalize_punct(text))   # model output can carry these too
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
@@ -424,6 +447,7 @@ def _looks_promo(text):
 # geolocation map cards ("Coordinates: 50.93284,34.81981" read digit by digit).
 _NOISE_LINE_RE = re.compile(
     r"^\s*(place|date|time|coordinates|geolocation|squad|source|map)\s*:|"
+    r"^\s*fwd from\b|\boriginal msg\b|\bsupport us\b|"
     r"boost the channel|subscribe|follow us|watch here|"
     r"\|\s*(socials|donate|advertising|boost)|@\w+\s*\|",
     re.IGNORECASE,
