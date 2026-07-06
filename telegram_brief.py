@@ -172,10 +172,11 @@ def _for_speech(s):
     s = re.sub(r"https?://\S+", "", s)               # bare URLs
     s = re.sub(r"#\w+", "", s)                       # hashtags, word and all
     s = _strip_symbols(s)                            # emoji + all symbol chars
-    # Wire-service urgency stamps are noise by the time the brief is read.
-    s = re.sub(r"(?im)^[\W_]*(?:breaking(?:\s+news)?|urgent|just in)\s*(?:[.:,|–—-]+\s*|$)", "", s)
-    s = _normalize_punct(s)
     s = re.sub(r"[*_`#>]+", "", s)                   # markdown emphasis/heading marks
+    # Wire-service urgency stamps are noise by the time the brief is read.
+    # (After the markdown strip, so "**BREAKING**" is caught too.)
+    s = re.sub(r"(?im)^\W*(?:breaking(?:\s+news)?|urgent|just in)\s*(?:[.:,|–—-]+\s*|$)", "", s)
+    s = _normalize_punct(s)
     s = re.sub(r"[\[\]()]", "", s)                   # leftover brackets
     s = re.sub(r"\s+", " ", s)
     return s.strip()
