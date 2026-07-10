@@ -40,7 +40,7 @@ them. The listeners never touch anything except leaving the laptop plugged in.
   (Called by telegradam.sh; safe standalone.)
 - `run_now.sh` — fire the real launchd job immediately and print the outcome (logs +
   brief.txt). SENDS a real brief to Saved Messages — it is a live test, not a dry run.
-- `requirements.txt` — pinned deps (`telethon`, plus `tomli` only on Python < 3.11).
+- `requirements.txt` — version-bounded deps (`telethon>=1.36,<2`, plus `tomli` only on Python < 3.11).
 
 ## Setup order (per machine)
 The maintainer just runs `./telegradam.sh`, which walks through all of this. Individually:

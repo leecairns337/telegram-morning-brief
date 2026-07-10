@@ -145,7 +145,8 @@ do it when you could fix a surprise.
 
 ## Notes
 - **Cost:** free. No API keys to fund — the voice and the summary both run on the laptop.
-- **If it breaks:** you'll get the ⚠️ alert (prefixed with that machine's `name`).
+- **If it breaks:** you'll get the ⚠️ alert (prefixed with that machine's `name`). With
+  `daily_heartbeat = true` you also get a short success ping every morning, so silence means trouble.
   Usually it's an expired login — re-run step 5. Run `--check` first to see what's wrong.
 - **Quiet nights:** the owner gets a short "🌙 Quiet night" text instead of audio, so
   silence never looks like a breakage.

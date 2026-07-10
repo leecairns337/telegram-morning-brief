@@ -78,7 +78,7 @@ From then on it runs itself every morning. Health-check it any time with:
 | `[summary] focus` | Topic areas that count as news — everything else is filtered out |
 | `[summary] mode` | `"extractive"` (verbatim, can't fabricate) or `"synthesis"` (prose, can err) |
 | `[voice] say_voice` | Any installed macOS voice — Enhanced/Premium ones sound best |
-| `[alerts]` | A username to ping if a morning ever fails, plus a per-machine name |
+| `[alerts]` | A username to ping if a morning ever fails, a per-machine name, and an optional daily success heartbeat (`daily_heartbeat`) |
 
 Full walkthrough, voice tips and troubleshooting: **[SETUP.md](SETUP.md)**.
 

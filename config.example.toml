@@ -19,7 +19,7 @@ follow = [
 
 [schedule]
 scrape_time    = "03:40"   # 24-hour HH:MM — when the brief is built and sent
-lookback_hours = 8         # how far back to read (8h ≈ 8pm to 4am)
+lookback_hours = 8         # how far back to read (8h before the 03:40 default = 7:40pm to 3:40am)
 lid_closed     = false     # set true ONLY if the laptop lid is shut overnight
 
 [voice]
