@@ -31,19 +31,17 @@ say_voice = ""
 rate      = 175    # speaking speed in words per minute (slower 150, faster 200)
 
 [summary]
-# Local AI summary via Ollama (free, runs on this Mac). Needs Ollama installed:
-#     brew install ollama && brew services start ollama && ollama pull gemma2:9b
-# If the Ollama server isn't reachable, the brief falls back to the rule-based
-# [digest] below. Set enabled = false to skip the AI entirely.
+# AI summary by Apple's on-device model (Apple Intelligence: free, runs on this
+# Mac, nothing leaves it). Needs Apple Intelligence switched on in System
+# Settings, and the small apple_llm helper that ./setup.sh builds. If the model
+# isn't available, the brief falls back to the rule-based [digest] below.
+# Set enabled = false to skip the AI entirely.
 enabled       = true
 # "extractive" = the AI only SELECTS and groups real messages; the brief reads the
 #   actual message text, so the AI cannot invent facts (most faithful — recommended).
 # "synthesis"  = the AI writes its own prose summary (smoother, but can fabricate).
 mode          = "extractive"
-max_groups    = 12                          # extractive: max number of stories read out
-model         = "gemma2:9b"                 # an installed Ollama model (see: ollama list)
-ollama_host   = "http://127.0.0.1:11434"    # default local Ollama address
-startup_wait_s = 90                         # wait this long for the server to wake/start
+max_groups    = 12                          # max number of stories read out
 
 # Only include stories that bear on these areas. Edit the list to change what
 # counts as important; everything else (trivia, memes, local crime, celebrity,
@@ -54,7 +52,7 @@ focus = [
 ]
 
 [digest]
-# Fallback only — used when the AI summary is off or Ollama is unreachable.
+# Fallback only — used when the AI summary is off or Apple's model is unavailable.
 # Assembled by simple rules (no AI): headline of each message, deduped, capped.
 style          = "headlines"  # "headlines" = first line of each message; "full" = whole message
 max_items      = 25           # cap: at most this many items are read aloud (most recent kept)

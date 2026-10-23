@@ -19,7 +19,7 @@ sleep 2
 
 # Wait for the job to finish: launchctl list shows a PID while it runs, "-" after.
 printf "Running"
-for _ in $(seq 1 120); do            # up to ~10 minutes (Ollama can be slow to load)
+for _ in $(seq 1 120); do            # up to ~10 minutes (the AI reads every message, ~2 min)
   pid=$(launchctl list | awk -v l="$LABEL" '$3==l {print $1}')
   [ "$pid" = "-" ] && break
   printf "."

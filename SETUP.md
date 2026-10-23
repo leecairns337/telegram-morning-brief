@@ -8,11 +8,11 @@ Each morning they get **two messages** in Saved Messages:
 2. 🔎 a **Sources** text message — each item with its channel, time, and a tappable
    link straight to the original Telegram message (for verifying or following up).
 
-**Fully free — no paid accounts.** The voice is the built-in macOS `say`. A local AI
-model (Ollama, on the laptop) picks which overnight messages matter — filtered to the
+**Fully free — no paid accounts.** The voice is the built-in macOS `say`. Apple's
+on-device AI model (Apple Intelligence, on the laptop) picks which overnight messages matter — filtered to the
 areas in `config.toml` `[summary] focus`. In the default **extractive** mode the AI
 only *selects* messages; the brief is read from the *actual message text*, so it can't
-invent facts. If Ollama is off or unreachable, a rule-based headline digest goes out
+invent facts. If Apple's model is unavailable, a rule-based headline digest goes out
 instead — a brief always arrives. Nothing is sent to any cloud service except Telegram
 itself.
 
@@ -61,12 +61,11 @@ cd ~/tgbrief
 It creates the Python environment, installs the dependencies, and creates
 `config.toml` from the template. Re-running it is always safe.
 
-For the AI summary, also install Ollama (free, local):
-```
-brew install ollama && brew services start ollama && ollama pull gemma2:9b
-```
-(Skip this and set `enabled = false` under `[summary]` — you'll get the rule-based
-headline digest instead.)
+For the AI summary, the Mac needs Apple Intelligence switched on (System Settings >
+Apple Intelligence & Siri; Apple silicon, macOS 26 or later) and the Xcode command
+line tools (`xcode-select --install`), which `setup.sh` uses to build the small
+`apple_llm` helper that talks to the model. (Skip this and set `enabled = false`
+under `[summary]` — you'll get the rule-based headline digest instead.)
 
 ## 3. Fill in config.toml
 Open `config.toml` in any text editor and set:
@@ -94,7 +93,7 @@ voices can't be used by `say` — pick an Enhanced/Premium one.
 ```
 .venv/bin/python3 telegram_brief.py --check
 ```
-This verifies the config, the voice, Ollama and (once logged in) every channel handle
+This verifies the config, the voice, Apple's AI model and (once logged in) every channel handle
 — in seconds, without sending anything. Fix any FAIL lines it prints.
 
 ## 5. First run — the one-time login
@@ -132,12 +131,11 @@ said — then check their Saved Messages for the audio.
 
 ## Maintenance (occasional — only when you're at the machine)
 Nothing auto-updates, deliberately: an unattended machine wants stability, and
-even a broken Ollama only degrades the brief to the rule-based digest, never
+even an unavailable AI model only degrades the brief to the rule-based digest, never
 kills it. Every month or three, while you're there anyway:
 ```
 git pull                                       # update this tool
-brew upgrade ollama && brew services restart ollama
-ollama pull gemma2:9b                          # refresh the model if upstream changed
+./setup.sh                                     # rebuild the Apple model helper if it changed
 .venv/bin/python3 telegram_brief.py --check    # confirm everything is still green
 ```
 Never update anything remotely the evening before you can't be reached —
