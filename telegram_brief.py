@@ -27,6 +27,7 @@ import re
 import subprocess
 import sys
 import unicodedata
+import wave
 from pathlib import Path
 
 try:
@@ -165,14 +166,14 @@ def _strip_symbols(s):
 
 
 def _strip_foreign_script(s):
-    """Drop words in non-Latin scripts (Cyrillic, Arabic, Hebrew, CJK ...). The
-    channels post in English, but some sign off in Russian ("Новости России,
-    Военные Сводки"), which the English voice reads as gibberish. Names in the
-    stories themselves already arrive in Latin letters. Punctuation left
+    """Drop words in scripts the brief can't voice (Arabic, Hebrew, CJK ...),
+    which an English voice reads as gibberish. Latin and Cyrillic stay:
+    Russian is read out by a Russian voice (see speak()). Punctuation left
     dangling by a removed run ("Summary , .") is tidied up too."""
     out = "".join(
         ch for ch in s
-        if not ch.isalpha() or "LATIN" in unicodedata.name(ch, "LATIN")
+        if not ch.isalpha() or any(k in unicodedata.name(ch, "LATIN")
+                                   for k in ("LATIN", "CYRILLIC"))
     )
     if out == s:
         return s
@@ -191,7 +192,7 @@ def _for_speech(s):
     s = re.sub(r"https?://\S+", "", s)               # bare URLs
     s = re.sub(r"#\w+", "", s)                       # hashtags, word and all
     s = _strip_symbols(s)                            # emoji + all symbol chars
-    s = _strip_foreign_script(s)                     # "Новости России" signatures etc.
+    s = _strip_foreign_script(s)                     # scripts no voice here can read
     s = re.sub(r"[*_`#>]+", "", s)                   # markdown emphasis/heading marks
     # Wire-service urgency stamps are noise by the time the brief is read.
     # (After the markdown strip, so "**BREAKING**" is caught too.)
@@ -695,34 +696,89 @@ def select_relevant(items, summary_cfg):
     return "\n".join(spoken) if len(spoken) > 1 else None
 
 
-def speak(text, path, say_voice="", rate=None):
-    """Render text to an audio file with the built-in macOS `say` command."""
-    # `say` writes to an AIFF temp first. We do NOT let `say` pick the .m4a codec:
-    # it sometimes emits raw LPCM in an .m4a container, which shows a duration but
-    # plays SILENT on Telegram mobile. We then transcode to real AAC with afconvert.
-    aiff = Path(str(path) + ".aiff")
+# A stretch of Russian: Cyrillic words plus the spaces and punctuation
+# between them, so "Новости России, Военные Сводки" stays one phrase.
+_CYRILLIC_RUN_RE = re.compile(r"[\u0400-\u04ff](?:[\u0400-\u04ff\s,.;:!?«»\"'()\-]*[\u0400-\u04ff.!?»])?")
+
+
+def _russian_voice(configured=""):
+    """The voice for Russian stretches: the configured one if it's installed,
+    else the first installed ru_RU voice (Milena ships with macOS), else ""
+    for none. Never a name `say` would reject, which would sink the brief."""
+    say_bin = "/usr/bin/say" if Path("/usr/bin/say").exists() else "say"
+    try:
+        listing = subprocess.run([say_bin, "-v", "?"], capture_output=True, text=True).stdout
+    except Exception:
+        return ""
+    russian = []
+    for line in listing.splitlines():
+        m = re.match(r"(.+?)\s+([a-z]{2}_[A-Z]{2})\s", line)
+        if configured and line.startswith(configured + " "):
+            return configured
+        if m and m.group(2) == "ru_RU":
+            russian.append(m.group(1).strip())
+    return russian[0] if russian else ""
+
+
+def _speech_parts(text, russian_voice):
+    """Split the brief into (text, is_russian) parts. With no Russian voice
+    installed, Russian is dropped rather than read as gibberish."""
+    parts, pos = [], 0
+    for m in _CYRILLIC_RUN_RE.finditer(text):
+        if m.start() > pos:
+            parts.append((text[pos:m.start()], False))
+        if russian_voice:
+            parts.append((m.group(0), True))
+        pos = m.end()
+    parts.append((text[pos:], False))
+    return [(t, ru) for t, ru in parts if t.strip(" \t,;:")]
+
+
+def speak(text, path, say_voice="", rate=None, russian_voice=""):
+    """Render text to an audio file with the built-in macOS `say` command.
+    Russian stretches are read by a Russian voice, the rest by `say_voice`."""
     # Absolute paths: the launchd (scheduled) environment has a minimal PATH, so
     # bare "say"/"afconvert" could fail to resolve at 3:40am. These live in /usr/bin.
     say_bin = "/usr/bin/say" if Path("/usr/bin/say").exists() else "say"
     afconvert_bin = "/usr/bin/afconvert" if Path("/usr/bin/afconvert").exists() else "afconvert"
-    cmd = [say_bin, "-o", str(aiff), "--file-format=AIFF"]
-    if say_voice:
-        cmd += ["-v", say_voice]
-    if rate:
-        cmd += ["-r", str(rate)]
-    cmd += ["-f", "-"]                    # read the text from stdin (handles long input)
+    russian_voice = _russian_voice(russian_voice)
+    parts = _speech_parts(text, russian_voice)
+
+    # Each part is spoken to its own WAV in one fixed format, so they can be
+    # joined sample for sample. We do NOT let `say` pick the .m4a codec: it
+    # sometimes emits raw LPCM in an .m4a container, which shows a duration but
+    # plays SILENT on Telegram mobile. The joined WAV is transcoded to real AAC.
+    wavs = []
+    joined = Path(str(path) + ".wav")
     try:
-        # Encode to UTF-8 ourselves (input as bytes) so it works even when the
-        # terminal locale is ASCII — otherwise curly quotes etc. crash the pipe.
-        subprocess.run(cmd, input=text.encode("utf-8"), check=True)
+        for n, (chunk, is_russian) in enumerate(parts):
+            wav = Path(f"{path}.{n}.wav")
+            wavs.append(wav)
+            voice = russian_voice if is_russian else say_voice
+            cmd = [say_bin, "-o", str(wav), "--file-format=WAVE", "--data-format=LEI16@22050"]
+            if voice:
+                cmd += ["-v", voice]
+            if rate:
+                cmd += ["-r", str(rate)]
+            cmd += ["-f", "-"]                # read the text from stdin (handles long input)
+            # Encode to UTF-8 ourselves (input as bytes) so it works even when the
+            # terminal locale is ASCII — otherwise curly quotes etc. crash the pipe.
+            subprocess.run(cmd, input=chunk.encode("utf-8"), check=True)
+        with wave.open(str(joined), "wb") as out:
+            for k, wav in enumerate(wavs):
+                with wave.open(str(wav), "rb") as w:
+                    if k == 0:
+                        out.setparams(w.getparams())
+                    out.writeframes(w.readframes(w.getnframes()))
         # Transcode to AAC in an m4a container — the format Telegram plays everywhere.
         subprocess.run(
             [afconvert_bin, "-f", "m4af", "-d", "aac", "-b", "64000",
-             str(aiff), str(path)],
+             str(joined), str(path)],
             check=True,
         )
     finally:
-        aiff.unlink(missing_ok=True)
+        for f in wavs + [joined]:
+            f.unlink(missing_ok=True)
 
 
 async def run_check(cfg):
@@ -757,6 +813,10 @@ async def run_check(cfg):
                f'say voice "{say_voice}" is installed', "list valid names with:  say -v '?'")
     else:
         report(True, "say voice: system default")
+    ru_voice = _russian_voice(cfg.get("voice", {}).get("russian_voice", ""))
+    report(bool(ru_voice), f'Russian voice for Russian text: {ru_voice or "none installed"}',
+           "Russian text will be skipped; add one in System Settings > Accessibility > "
+           "Spoken Content > System Voice > Manage Voices")
 
     # --- Apple's on-device model (only if the AI summary is on) ---
     summary_cfg = cfg.get("summary", {})
@@ -896,7 +956,8 @@ async def main():
             n_lines = max(0, len([ln for ln in spoken.splitlines() if ln.strip()]) - 1)
             print(f"Spoken: {spoken_by}, {n_lines} item(s).")
             OUT_TEXT.write_text(spoken + "\n")
-            speak(spoken, OUT_AUDIO, voice.get("say_voice", ""), voice.get("rate"))
+            speak(spoken, OUT_AUDIO, voice.get("say_voice", ""), voice.get("rate"),
+                  voice.get("russian_voice", ""))
             stamp = dt.datetime.now().strftime("%a %d %b, %H:%M")
             await client.send_file("me", OUT_AUDIO, caption=f"Overnight brief — {stamp}")
             if sources:

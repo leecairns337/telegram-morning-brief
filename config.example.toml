@@ -29,6 +29,10 @@ lid_closed     = false     # set true ONLY if the laptop lid is shut overnight
 # System Voice > Manage Voices, then pick an (Enhanced) or (Premium) one.
 say_voice = ""
 rate      = 175    # speaking speed in words per minute (slower 150, faster 200)
+# Russian text in a message is read by a Russian voice. Leave "" to use the
+# first one installed (Milena comes with macOS), or set a name from the ru_RU
+# lines of:  say -v '?'
+russian_voice = ""
 
 [summary]
 # AI summary by Apple's on-device model (Apple Intelligence: free, runs on this
