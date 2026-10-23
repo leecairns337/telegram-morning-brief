@@ -23,6 +23,7 @@ mode (the model writes its own prose) is available but can invent details.
 import asyncio
 import datetime as dt
 import json
+import platform
 import re
 import subprocess
 import sys
@@ -821,6 +822,11 @@ async def run_check(cfg):
     # --- Apple's on-device model (only if the AI summary is on) ---
     summary_cfg = cfg.get("summary", {})
     if summary_cfg.get("enabled", True):
+        mac_ver = platform.mac_ver()[0] or "0"
+        report(platform.machine() == "arm64" and int(mac_ver.split(".")[0]) >= 27,
+               f"Apple silicon Mac on macOS 27 or later (this one: {platform.machine()}, "
+               f"macOS {mac_ver})",
+               "the AI summary needs both; below that, set [summary] enabled = false")
         if not APPLE_LLM.exists():
             report(False, "Apple model helper (apple_llm) is built", "run:  ./setup.sh")
         else:

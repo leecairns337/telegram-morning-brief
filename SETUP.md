@@ -61,11 +61,13 @@ cd ~/tgbrief
 It creates the Python environment, installs the dependencies, and creates
 `config.toml` from the template. Re-running it is always safe.
 
-For the AI summary, the Mac needs Apple Intelligence switched on (System Settings >
-Apple Intelligence & Siri; Apple silicon, macOS 26 or later) and the Xcode command
-line tools (`xcode-select --install`), which `setup.sh` uses to build the small
-`apple_llm` helper that talks to the model. (Skip this and set `enabled = false`
-under `[summary]` — you'll get the rule-based headline digest instead.)
+**Minimum requirements:** a Mac with Apple silicon (M1 or later) on **macOS 27 or
+later**, with Apple Intelligence switched on (System Settings > Apple Intelligence &
+Siri) and its model downloaded, plus the Xcode command line tools
+(`xcode-select --install`), which `setup.sh` uses to build the small `apple_llm`
+helper that talks to the model. `setup.sh` and `--check` both warn if the Mac falls
+short. (Without Apple Intelligence, set `enabled = false` under `[summary]` and you
+get the rule-based headline digest instead.)
 
 ## 3. Fill in config.toml
 Open `config.toml` in any text editor and set:

@@ -48,6 +48,12 @@ them. The listeners never touch anything except leaving the laptop plugged in.
   brief.txt). SENDS a real brief to Saved Messages — it is a live test, not a dry run.
 - `requirements.txt` — version-bounded deps (`telethon>=1.36,<2`, plus `tomli` only on Python < 3.11).
 
+## Minimum requirements (per machine)
+A Mac with Apple silicon (M1 or later) on **macOS 27 or later**, Apple Intelligence
+switched on with its model downloaded, and the Xcode command line tools (to build
+`apple_llm`). `setup.sh` and `--check` flag a Mac that falls short. Below that the
+brief still runs, but only as the rule-based digest.
+
 ## Setup order (per machine)
 The maintainer just runs `./telegradam.sh`, which walks through all of this. Individually:
 1. `./setup.sh` — venv, dependencies, `config.toml` from the template.
@@ -62,6 +68,7 @@ The maintainer just runs `./telegradam.sh`, which walks through all of this. Ind
 6. Test: `./run_now.sh` (fires the real job, prints logs + brief.txt), then check Saved Messages.
 
 ## Deploying to another MacBook
+- Check the Mac first: Apple silicon and macOS 27 or later (see Minimum requirements).
 - Bring only the code: `.py` files, `config.example.toml`, `requirements.txt`, `setup.sh`,
   docs. **NEVER copy `config.toml` or `tg_brief.session`** — the session file IS a
   Telegram login; copying it makes the new Mac post as the wrong person's account.

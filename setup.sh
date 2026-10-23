@@ -21,6 +21,14 @@ if [ ! -f config.toml ]; then
   echo "Created config.toml from the template — you must edit it next."
 fi
 
+# Minimum for the AI summary: Apple silicon and macOS 27.
+if [ "$(uname -m)" != "arm64" ] || [ "$(sw_vers -productVersion | cut -d. -f1)" -lt 27 ]; then
+  echo ""
+  echo "NOTE: the AI summary needs an Apple silicon Mac on macOS 27 or later"
+  echo "      (this one: $(uname -m), macOS $(sw_vers -productVersion))."
+  echo "      Without it the brief goes out as the rule-based headline digest."
+fi
+
 # The AI summary uses Apple's on-device model through a tiny Swift helper
 # (optional — set [summary] enabled=false to skip). Needs the Xcode command
 # line tools to build, and Apple Intelligence switched on to run.
