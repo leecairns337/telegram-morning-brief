@@ -21,12 +21,24 @@ if [ ! -f config.toml ]; then
   echo "Created config.toml from the template — you must edit it next."
 fi
 
-# The AI summary needs Ollama (optional — set [summary] enabled=false to skip).
-if ! command -v ollama >/dev/null 2>&1; then
+# The AI summary uses Apple's on-device model through a tiny Swift helper
+# (optional — set [summary] enabled=false to skip). Needs the Xcode command
+# line tools to build, and Apple Intelligence switched on to run.
+if command -v swiftc >/dev/null 2>&1; then
+  if [ ! -x apple_llm ] || [ apple_llm.swift -nt apple_llm ]; then
+    swiftc -O apple_llm.swift -o apple_llm 2>/dev/null
+    echo "Built the Apple model helper (apple_llm)."
+  fi
+  if ! ./apple_llm --check >/dev/null 2>&1; then
+    echo ""
+    echo "NOTE: Apple's on-device model isn't available yet. For the AI summary,"
+    echo "      turn on Apple Intelligence (System Settings > Apple Intelligence & Siri)"
+    echo "      and let it finish downloading, or set 'enabled = false' under [summary]."
+  fi
+else
   echo ""
-  echo "NOTE: Ollama not found. For the AI summary run:"
-  echo "        brew install ollama && brew services start ollama && ollama pull gemma2:9b"
-  echo "      or set 'enabled = false' under [summary] in config.toml."
+  echo "NOTE: Swift not found. For the AI summary run:  xcode-select --install"
+  echo "      then re-run ./setup.sh, or set 'enabled = false' under [summary]."
 fi
 
 cat <<'EOF'

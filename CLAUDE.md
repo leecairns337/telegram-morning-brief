@@ -3,14 +3,15 @@
 ## What this is
 A small automation that gives a news-follower (e.g. a journalist — **not technically minded**)
 a spoken news brief each morning. It reads their Telegram news chats overnight, picks what
-matters with a **local Ollama model** (`[summary]` in config — "extractive" mode only
+matters with **Apple's on-device model** (Apple Intelligence, via the small Swift helper
+`apple_llm` that `setup.sh` builds; `[summary]` in config — "extractive" mode only
 SELECTS real messages so it can't fabricate; "synthesis" writes prose but can), converts
 it to speech with the built-in macOS `say` voice, and posts the audio (plus a 🔎 Sources
 message with links) to their Telegram **Saved Messages** so it's waiting on their phone
 when they wake.
 
 **Fully free / offline-ish:** the only external services are Telegram and nothing else —
-Ollama runs on the laptop. If Ollama is off/unreachable, a rule-based headline digest
+the AI runs on the laptop. If Apple's model is unavailable, a rule-based headline digest
 (`[digest]` section: first lines, de-duplicated, capped) goes out instead, so a brief
 always arrives.
 
@@ -30,7 +31,12 @@ them. The listeners never touch anything except leaving the laptop plugged in.
 - `config.example.toml` — the safe template `config.toml` is created from on a new machine.
 - `telegram_brief.py` — does the scrape → summarise/digest → speak (`say`) → send. Reads
   `config.toml`. Also has a read-only `--check` mode that validates an install in seconds
-  (config, voice, Ollama, login, every channel handle) without sending anything.
+  (config, voice, Apple model, login, every channel handle) without sending anything.
+- `apple_llm.swift` — tiny Swift helper that sends one prompt to Apple's on-device model
+  (the Foundation Models framework is Swift-only). `setup.sh` compiles it to `apple_llm`
+  (gitignored). The Python judges each message on its own with a multiple-choice question
+  (a 3B model answers "yes" to nearly any yes/no question), and uses plain-text replies
+  because guided generation always runs under the strict guardrails, which block war news.
 - `install_schedule.py` — reads `config.toml` and applies the daily schedule + sleep/wake
   behaviour to macOS. Run once at setup, and again whenever scrape_time or lid_closed change.
 - `telegradam.sh` — the maintainer's one-command deploy: setup → config → login → schedule →
@@ -47,8 +53,8 @@ The maintainer just runs `./telegradam.sh`, which walks through all of this. Ind
 1. `./setup.sh` — venv, dependencies, `config.toml` from the template.
 2. Fill in `config.toml` (Telegram api_id/api_hash from my.telegram.org using the
    OWNER's number; channels; optional voice/summary tuning; maintainer's @username and a
-   machine `name` for alerts). No paid keys. Optional: `brew install ollama` +
-   `ollama pull gemma2:9b` for the AI summary.
+   machine `name` for alerts). No paid keys. For the AI summary: Apple Intelligence switched
+   on, and the Xcode command line tools so `setup.sh` can build `apple_llm`.
 3. `.venv/bin/python3 telegram_brief.py --check` — fix any FAIL lines it prints.
 4. `python3 telegram_brief.py --login` — the one-time interactive Telegram login
    (login only, scrapes and sends nothing; a plain run also logs in first if needed).
@@ -85,7 +91,7 @@ The maintainer just runs `./telegradam.sh`, which walks through all of this. Ind
 
 ## Troubleshooting playbook
 - **First move for anything:** `.venv/bin/python3 telegram_brief.py --check` — it
-  pinpoints dead logins, bad channel handles, missing voices and Ollama problems.
+  pinpoints dead logins, bad channel handles, missing voices and an unavailable Apple model.
 - **No brief arrived:** check `run.err` first. Common causes below.
 - **"What did it say this morning?"** — `brief.txt` holds the exact spoken words of the
   last run, and `run.log` says which path produced them (`Spoken: AI extractive, 5 item(s).`).

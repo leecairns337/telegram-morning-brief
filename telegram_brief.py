@@ -4,16 +4,16 @@ Overnight Telegram -> audio brief.  (Fully local, no paid APIs.)
 
 All settings live in config.toml — you should not need to edit this file.
 Pulls recent messages from the chats listed in config.toml, summarises them
-with a LOCAL AI model (Ollama, running on this Mac — free, no account), turns
-the summary into speech with the built-in macOS `say` voice, and posts the
+with Apple's on-device AI model (Apple Intelligence, on this Mac — free, no
+account), turns the summary into speech with the built-in macOS `say` voice, and posts the
 audio to Telegram Saved Messages — plus a text "Sources" message with a
 tappable link to each original.
 
-No paid APIs, no cloud: the only external service is Telegram. If the local
-Ollama server isn't reachable, it falls back to a rule-based headline digest so
-a brief still goes out. See the [summary] and [digest] sections of config.toml.
+No paid APIs, no cloud: the only external service is Telegram. If Apple's
+model isn't available, it falls back to a rule-based headline digest so a brief
+still goes out. See the [summary] and [digest] sections of config.toml.
 
-Default summary mode is "extractive": the local model only SELECTS and groups
+Default summary mode is "extractive": the on-device model only SELECTS and groups
 the real messages worth airing (filtered to the [summary] focus areas); the
 brief is then read from the actual message text. The model writes no prose, so
 it cannot fabricate names or facts — important for a journalist. A "synthesis"
@@ -26,10 +26,7 @@ import json
 import re
 import subprocess
 import sys
-import time
 import unicodedata
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 try:
@@ -46,7 +43,10 @@ SESSION = str(HERE / "tg_brief")     # login session file (created on first run)
 OUT_AUDIO = HERE / "brief.m4a"       # macOS `say` writes m4a; Telegram plays it fine
 OUT_TEXT = HERE / "brief.txt"        # written record of what the voice said
 MAX_MSGS_PER_CHAT = 300              # safety cap per chat
-PROMPT_CHAR_BUDGET = 24000           # max chars of messages fed to the local model
+APPLE_LLM = HERE / "apple_llm"       # built from apple_llm.swift by setup.sh
+JUDGE_MSG_CHARS = 700                # long posts are cut to this for judging (not for reading)
+SAME_STORY_HOURS = 3                 # reports further apart than this are never merged
+SAME_STORY_NAME_SHARE = 0.05         # a name in more of the night's messages than this is too common to link two
 TELEGRAM_MSG_LIMIT = 4000            # stay safely under Telegram's 4096-char cap
 
 
@@ -204,20 +204,6 @@ def _split_message(text, limit=TELEGRAM_MSG_LIMIT):
     return chunks
 
 
-def _keep_newest(lines, budget):
-    """Keep as many of the NEWEST lines (list is oldest→newest) as fit in a
-    character budget. Returns (kept_lines, dropped_count) — for a morning news
-    brief, recency wins, so overflow always drops the oldest."""
-    total = 0
-    start = len(lines)
-    for i in range(len(lines) - 1, -1, -1):
-        total += len(lines[i]) + 1
-        if total > budget:
-            break
-        start = i
-    return lines[start:], start
-
-
 def _trim_log(path, keep=400):
     """Keep run.log / run.err from growing forever on machines nobody looks at.
     Safe while launchd holds the file open: it appends (O_APPEND), so writes
@@ -287,28 +273,10 @@ SUMMARY_SYSTEM = (
     "instead of guessing. You write plain spoken prose."
 )
 
-def _focus_block(focus):
-    """Build the relevance-filter instruction from the [summary] focus list."""
-    if not focus:
-        return ""
-    bullets = "\n".join(f"  - {f}" for f in focus)
-    return (
-        "RELEVANCE FILTER — apply this FIRST, before anything else:\n"
-        "Only include stories that genuinely bear on one of these areas:\n"
-        f"{bullets}\n"
-        "Leave out everything else entirely — trivia, memes, stunts, celebrity, sport, "
-        "weather, local crime, and any item that does not clearly relate to the areas "
-        "above. A story counts only if its core subject is one of those areas; do not "
-        "stretch a tangential mention to qualify. If nothing qualifies, say only: "
-        "\"Good morning. Nothing of note came in overnight.\"\n\n"
-    )
-
-
 SUMMARY_INSTRUCTIONS = """Write the spoken morning brief now. The key rule: SYNTHESISE, do
 not relay. Do NOT walk through messages one by one. Instead:
 
-1. Work out the MAIN stories the messages collectively describe that pass the relevance
-   filter above.
+1. Work out the MAIN stories the messages collectively describe.
 2. For each story, write a short factual paragraph: pull every related message into one
    account of what happened, then state the concrete implications — the direct, factual
    consequences for the parties or situation involved (what it changes, what follows from
@@ -359,93 +327,270 @@ def _clean_spoken(text):
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
-def _ollama_ready(host, timeout_s):
-    """Wait until the local Ollama server answers, up to timeout_s. True if up."""
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        try:
-            urllib.request.urlopen(f"{host}/api/version", timeout=3)
-            return True
-        except Exception:
-            time.sleep(2)
-    return False
+class AppleModelUnavailable(Exception):
+    """Apple Intelligence is off, still downloading, or the helper is missing."""
 
 
-def _ollama_generate(summary_cfg, system, prompt, options, want_json=False):
-    """One request to the local Ollama server. Returns the response text, or
-    None on any failure so the caller falls back to the rule-based digest."""
-    host = summary_cfg.get("ollama_host", "http://127.0.0.1:11434").rstrip("/")
-    model = summary_cfg.get("model", "gemma2:9b")
-    wait_s = int(summary_cfg.get("startup_wait_s", 60))
+def _apple_generate(system, prompt, temperature=0.0, max_tokens=500):
+    """One request to Apple's on-device model via the apple_llm helper.
 
-    if not _ollama_ready(host, wait_s):
-        print("Ollama not reachable — falling back to rule-based digest.")
-        return None
-
-    # num_ctx matters: without it Ollama uses a small default context window and
-    # SILENTLY drops the front of a long prompt — most of the night's messages.
-    payload = {
-        "model": model,
-        "system": system,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"num_ctx": 8192, **options},
-    }
-    if want_json:
-        payload["format"] = "json"          # ask Ollama to constrain output to JSON
+    Returns (text, status): status is "ok", "too_long" (prompt
+    over the context window), "blocked" (Apple's safety guardrails) or "error".
+    Raises AppleModelUnavailable when the model can't be used at all, so the
+    caller stops trying and falls back to the rule-based digest."""
+    if not APPLE_LLM.exists():
+        raise AppleModelUnavailable("apple_llm helper not built — run ./setup.sh")
+    req = {"system": system, "prompt": prompt,
+           "temperature": temperature, "max_tokens": max_tokens}
     try:
-        req = urllib.request.Request(
-            f"{host}/api/generate", data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=300) as resp:
-            out = json.loads(resp.read())
-        return (out.get("response") or "").strip()
-    except Exception as e:
-        print(f"Ollama request failed ({e}) — falling back to rule-based digest.")
-        return None
-
-
-def summarize_local(items, summary_cfg):
-    """Summarise the overnight messages with a local Ollama model.
-
-    Returns the spoken brief text, or None if Ollama is unreachable/failed so
-    the caller can fall back to the rule-based digest."""
-    # Feed the model the channel + time + text of each message (oldest first).
-    floor = dt.datetime.min.replace(tzinfo=dt.timezone.utc)
-    ordered = sorted(items, key=lambda it: it["dt"] or floor)
-    lines = [
-        f"[{it['channel']} {it['time']}] {_for_speech(it['text'])}" for it in ordered
-    ]
-    lines, cut = _keep_newest(lines, PROMPT_CHAR_BUDGET)
-    if cut:
-        print(f"[busy night: the oldest {cut} messages didn't fit the model prompt]")
-    raw = "\n".join(lines)
-
-    # Instructions go AFTER the messages too: small models attend most to the end.
-    # The relevance filter is stated both before the messages and in the trailing
-    # instructions, so the model applies it when deciding what to keep.
-    focus_block = _focus_block(summary_cfg.get("focus", []))
-    prompt = (
-        focus_block
-        + "Here are the raw overnight messages:\n\n"
-        + raw
-        + "\n\n" + focus_block + SUMMARY_INSTRUCTIONS
-    )
-    response = _ollama_generate(
-        summary_cfg, SUMMARY_SYSTEM, prompt,
-        {"temperature": 0.2, "num_predict": 900},
-    )
-    if response is None:
-        return None
-    return _clean_spoken(response) or None
+        proc = subprocess.run([str(APPLE_LLM)], input=json.dumps(req).encode("utf-8"),
+                              capture_output=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        return None, "error"
+    err = proc.stderr.decode("utf-8", "replace").strip()
+    if proc.returncode == 0:
+        return proc.stdout.decode("utf-8", "replace").strip(), "ok"
+    if proc.returncode == 2:
+        raise AppleModelUnavailable(err)
+    status = {3: "blocked", 4: "too_long"}.get(proc.returncode, "error")
+    if status == "error":
+        print(f"[Apple model error: {err}]")
+    return None, status
 
 
 SELECT_SYSTEM = (
-    "You are a wire-desk sub-editor selecting which raw overnight messages belong in a "
-    "morning news brief. You do NOT write or rephrase anything — you only choose message "
-    "numbers and group the ones that report the same story. You output JSON only."
+    "You are a wire-desk sub-editor judging raw overnight messages for a spoken morning "
+    "news brief. You judge each message on its own text only. You never add facts."
 )
+
+_TOPIC_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXY"
+_NOT_EVENT = ("QUOTE", "OPINION", "PROMO", "POLITICS", "SPORT", "OTHER")
+_EVENT = ("MILITARY", "DIPLOMATIC")
+
+
+def _judge_question(focus):
+    """The multiple-choice question asked about every message. A 3B model
+    answers "yes" to almost any yes/no question, but picks sensibly from a
+    short list of categories."""
+    lines = [
+        "Classify the message above. Answer in exactly three lines.",
+        "TYPE: one word from this list:",
+        "  QUOTE (mostly what someone said, an interview answer, a claim, a reaction)",
+        "  OPINION (analysis, commentary, explainer, prediction)",
+        "  PROMO (advert, schedule, links, a caption for a video or photo)",
+        "  POLITICS (domestic politics, rallies, hecklers, elections, campaigning, protests)",
+        "  SPORT",
+        "  OTHER (celebrity, trivia, memes, technology, business, anything else)",
+        "  MILITARY (a factual report of a strike, attack, casualties, or a troop or "
+        "weapons movement)",
+        "  DIPLOMATIC (a factual report of talks, a sanction, an evacuation, or an "
+        "official order or decision by a government)",
+    ]
+    if focus:
+        lines.append("TOPIC: one letter from this list:")
+        lines += [f"  {_TOPIC_LETTERS[k]} ({f})" for k, f in enumerate(focus)]
+        lines.append(f"  {_TOPIC_LETTERS[len(focus)]} (none of these)")
+    lines.append("LABEL: who did what, where, in at most 10 words.")
+    return "\n".join(lines)
+
+
+def _parse_judgement(raw, n_focus):
+    """(kind, on_topic) from the model's three-line answer: kind is "MILITARY"
+    or "DIPLOMATIC" for a reported event, else None. Small models
+    vary the layout ("TYPE: MILITARY", "Message classification: MILITARY, C, ...")
+    so this reads it loosely, and any hint of a non-event category wins."""
+    upper = raw.upper()
+    words = set(re.findall(r"[A-Z]+", upper))
+    kinds = words.intersection(_EVENT)
+    kind = None if len(kinds) != 1 or words.intersection(_NOT_EVENT) else kinds.pop()
+    if not n_focus:
+        return kind, True
+    valid = _TOPIC_LETTERS[:n_focus]
+    m = re.search(r"TOPIC\W*\b([A-Z])\b", upper)
+    if m:
+        letter = m.group(1)
+    else:    # "MILITARY, C, label..." — the first lone capital letter after the type
+        types = "|".join(_EVENT + _NOT_EVENT)
+        m = re.search(rf"\b(?:{types})\b\W+([A-Z])\b", upper)
+        letter = m.group(1) if m else ""
+    return kind, letter in valid
+
+
+def _judge(text, question, n_focus):
+    """Ask the model about one message. Returns (kind, on_topic), or a
+    status string ("blocked", "too_long", "error") if it gave no answer."""
+    prompt = "Message:\n" + text + "\n\n" + question
+    raw, status = _apple_generate(SELECT_SYSTEM, prompt, max_tokens=60)
+    if status != "ok":
+        return status
+    return _parse_judgement(raw, n_focus)
+
+
+_STOPWORDS = set("""
+about after again against also among another because been before being between
+both could during each first from have having into just last like made make many
+more most much near only other over said says some such than that their them then
+there these they this those through under until very want were what when where
+which while will with would your breaking urgent update just video watch reports
+report according sources source told today tonight overnight morning evening
+the and but for new big now not all its his her has had was are
+""".split())
+
+
+def _names(text):
+    """Capitalised words (places, people, organisations) in a message's opening."""
+    text = re.sub(r"@\w+", "", _for_speech(text)[:400])
+    words = re.findall(r"\b[A-Z][A-Za-z'-]{2,}", text)
+    return {re.sub(r"'s$", "", w.lower()) for w in words} - _STOPWORDS
+
+
+def _same_event(a, b):
+    """Ask the model whether two messages report the same event. A "SAME" is
+    only believed if it holds with the messages swapped too: a 3B model says
+    "SAME" now and then for unrelated stories, rarely twice."""
+    def ask(first, second):
+        prompt = (
+            f"Message 1:\n{_truncate(_for_speech(_strip_noise_lines(first)), 400)}\n\n"
+            f"Message 2:\n{_truncate(_for_speech(_strip_noise_lines(second)), 400)}\n\n"
+            "Do these two messages report the very same incident? Answer SAME only if "
+            "they describe one incident: the same action, by the same people, in the "
+            "same place. A different town, different people or a different kind of "
+            "action means DIFFERENT. Answer with one word: SAME or DIFFERENT."
+        )
+        raw, status = _apple_generate(SELECT_SYSTEM, prompt, max_tokens=5)
+        return status == "ok" and "SAME" in raw.upper() and "DIFFERENT" not in raw.upper()
+    return ask(a, b) and ask(b, a)
+
+
+def _same_story_groups(indices, ordered, kinds):
+    """Group messages that report the same event, so a story carried by three
+    channels is read once. Losing a story is worse than hearing it twice, so
+    this is cautious: two messages are only candidates when they are close in
+    time and share a SPECIFIC name (a place, person or organisation that few of
+    the night's messages mention: "Sirik" counts, "Israeli" does not, which
+    keeps "shells the town of X" templates apart). The model then has to call
+    them the same event both ways round, and both must be the same kind
+    (a strike never merges with a diplomatic meeting). Each message is compared with the
+    FIRST message of each story, never chained through other members."""
+    names = {i: _names(ordered[i]["text"]) for i in range(len(ordered))}
+    freq = {}
+    for ns in names.values():
+        for n in ns:
+            freq[n] = freq.get(n, 0) + 1
+    common = max(3, int(len(ordered) * SAME_STORY_NAME_SHARE))
+    specific = {i: {n for n in names[i] if freq[n] <= common} for i in indices}
+    window = dt.timedelta(hours=SAME_STORY_HOURS)
+
+    groups = []                         # each: [first message, *others]
+    for i in indices:
+        for grp in groups:
+            first = grp[0]
+            ti, tf = ordered[i]["dt"], ordered[first]["dt"]
+            if kinds[i] != kinds[first] or (ti and tf and abs(ti - tf) > window):
+                continue
+            if specific[i] & specific[first] and _same_event(
+                    ordered[first]["text"], ordered[i]["text"]):
+                grp.append(i)
+                break
+        else:
+            groups.append([i])
+    return groups
+
+
+def _representative(cands):
+    """The message to read out for a story group: the longest NON-PROMO one
+    (most complete account); if every candidate looks like promo, the first
+    rather than rewarding a platform-plug roundup for being long."""
+    pool = [it for it in cands if not _looks_promo(it["text"])] or cands[:1]
+    return max(pool, key=lambda it: len(it["text"]))
+
+
+def _pick_groups(ordered, summary_cfg):
+    """Select and group the messages worth airing, reading EVERY message.
+
+    Apple's on-device model judges each message on its own (what kind of
+    message is it, and is it on one of the focus topics); the keepers are then
+    grouped so duplicates collapse. Stories carried by more channels come
+    first, then the most recent. Returns groups of indices into `ordered`
+    (empty = nothing qualifies), or None to fall back to the rule-based digest."""
+    max_groups = int(summary_cfg.get("max_groups", 12))
+    focus = summary_cfg.get("focus", [])
+    question = _judge_question(focus)
+    skipped = {}
+    keep, kinds, answered = [], {}, 0
+    try:
+        for i, it in enumerate(ordered):
+            if _looks_promo(it["text"]):
+                continue
+            text = _truncate(_for_speech(_strip_noise_lines(it["text"])), JUDGE_MSG_CHARS)
+            verdict = _judge(text, question, len(focus))
+            if isinstance(verdict, str):
+                skipped[verdict] = skipped.get(verdict, 0) + 1
+                continue
+            answered += 1
+            kind, on_topic = verdict
+            if kind and on_topic:
+                keep.append(i)
+                kinds[i] = kind
+    except AppleModelUnavailable as e:
+        print(f"Apple model unavailable ({e}) — falling back to rule-based digest.")
+        return None
+    if skipped:
+        print(f"[Apple model gave no answer for some messages: {skipped}]")
+    print(f"[Apple model judged {answered} of {len(ordered)} messages, kept {len(keep)}]")
+    if not answered:
+        return None
+    if not keep:
+        return []
+
+    groups = _same_story_groups(keep, ordered, kinds)
+    floor = dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+
+    def weight(grp):
+        channels = {ordered[i]["channel"] for i in grp}
+        latest = max((ordered[i]["dt"] or floor) for i in grp)
+        return (len(channels), latest)
+
+    groups.sort(key=weight, reverse=True)
+    return groups[:max_groups]
+
+
+def summarize_local(items, summary_cfg):
+    """Synthesis mode: the on-device model writes its own prose brief.
+
+    Apple's model can't read a whole night at once, so the stories are first
+    picked exactly as in extractive mode, then the model writes prose from one
+    message per story. Returns the spoken brief text, or None to fall back to
+    the rule-based digest."""
+    floor = dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+    ordered = sorted(items, key=lambda it: it["dt"] or floor)
+    groups = _pick_groups(ordered, summary_cfg)
+    if groups is None:
+        return None
+    if not groups:
+        return "Good morning. Nothing of note came in overnight."
+    stories = [_representative([ordered[i] for i in grp]) for grp in groups]
+    lines = [f"[{it['channel']} {it['time']}] {_for_speech(_strip_noise_lines(it['text']))}"
+             for it in stories]
+    # Most important first, so if it's too long for the model drop from the END.
+    while lines:
+        prompt = (
+            "Here are the overnight messages, one per story:\n\n"
+            + "\n".join(lines)
+            + "\n\n" + SUMMARY_INSTRUCTIONS
+        )
+        try:
+            response, status = _apple_generate(SUMMARY_SYSTEM, prompt,
+                                               temperature=0.2, max_tokens=800)
+        except AppleModelUnavailable as e:
+            print(f"Apple model unavailable ({e}) — falling back to rule-based digest.")
+            return None
+        if status == "ok":
+            return _clean_spoken(response) or None
+        if status != "too_long":
+            return None
+        lines = lines[:-1]
+    return None
 
 
 _PROMO_RE = re.compile(
@@ -496,125 +641,29 @@ def _strip_noise_lines(text):
 
 
 def select_relevant(items, summary_cfg):
-    """Quote-only mode: the model SELECTS and GROUPS real messages (returns their
-    numbers); we then read the actual message text. The model writes no prose, so
-    it cannot invent facts. Returns spoken text, or None to fall back."""
-    max_groups = int(summary_cfg.get("max_groups", 12))
-    focus = summary_cfg.get("focus", [])
-
-    # Number every message so the model can refer to them without retyping text.
+    """Quote-only mode: the model SELECTS and GROUPS real messages; we then
+    read the actual message text. The model writes no prose, so it cannot
+    invent facts. Returns spoken text, or None to fall back."""
     floor = dt.datetime.min.replace(tzinfo=dt.timezone.utc)
     ordered = sorted(items, key=lambda it: it["dt"] or floor)
-    lines = [
-        f"[{i}] ({it['channel']} {it['time']}) {_for_speech(it['text'])}"
-        for i, it in enumerate(ordered)
-    ]
-    # Numbers index into `ordered`, so dropping the oldest lines keeps the rest valid.
-    lines, cut = _keep_newest(lines, PROMPT_CHAR_BUDGET)
-    if cut:
-        print(f"[busy night: the oldest {cut} messages didn't fit the model prompt]")
-    numbered = "\n".join(lines)
-
-    focus_txt = ""
-    if focus:
-        focus_txt = (
-            "RELEVANCE — include a message ONLY if it REPORTS A CONCRETE EVENT or official "
-            "action/decision whose core subject is one of:\n"
-            + "\n".join(f"  - {f}" for f in focus)
-            + "\nA message qualifies only if it describes something that HAPPENED (a strike, "
-            "an attack, a death toll, a sanction, a government/military decision, a troop or "
-            "weapons movement, a diplomatic action). EXCLUDE, even if they mention one of the "
-            "areas above:\n"
-            "  - opinion, analysis, commentary, predictions, or pundit/analyst/expert quotes\n"
-            "  - sport, football, entertainment, celebrity, protests at games\n"
-            "  - reactions, condemnations and 'X said' takes that report no new event\n"
-            "  - memes, stunts, trivia, weather, local crime, promos\n"
-            "  - captions to a video or photo, strings of quotes, slogans, viral clips\n"
-            "If you are unsure whether a message reports a real event, EXCLUDE it.\n\n"
-        )
-
-    instr = (
-        focus_txt
-        + "From the numbered messages above, choose only the ones that pass the relevance "
-        "test and group those reporting the SAME event together (to collapse duplicates).\n"
-        "Only choose messages whose text is a COMPLETE, SELF-CONTAINED news report — it "
-        "will be READ ALOUD with no image or video, so quote-fragments, captions and "
-        "one-liners that need the attached media make no sense. Skip those entirely.\n"
-        "Within each group, put FIRST the number of the message that most factually and "
-        "completely states the event (never a promo, schedule or link roundup).\n"
-        "Output JSON ONLY, no prose: a list of groups, each group a list of message "
-        "numbers, ordered most important first. Example: [[4,9],[12],[2,7,15]]\n"
-        f"Include at most {max_groups} groups. If nothing qualifies, output []."
-    )
-    prompt = numbered + "\n\n" + instr
-
-    response = _ollama_generate(
-        summary_cfg, SELECT_SYSTEM, prompt,
-        {"temperature": 0.0, "num_predict": 500}, want_json=True,
-    )
-    if response is None:
-        return None
-    groups = _parse_groups(response, len(ordered))
-    if groups is None:                    # unusable model output — digest fallback
+    groups = _pick_groups(ordered, summary_cfg)
+    if groups is None:                    # model unusable — digest fallback
         return None
     if not groups:
-        # A cleanly parsed "[]" is an ANSWER — nothing passed the focus filter —
-        # not a failure. Falling back here would read out the unfiltered digest
-        # of exactly the trivia the model just rejected.
+        # An answer of "nothing qualifies" is not a failure. Falling back here
+        # would read out the unfiltered digest of exactly the trivia the model
+        # just rejected.
         return "Good morning. Nothing of note came in overnight. End of brief."
 
     # Build the spoken brief from the ACTUAL message text. Nothing here is
-    # model-generated. Per group: the longest NON-PROMO message (most complete
-    # account); if every candidate looks like promo, trust the model's first
-    # pick rather than rewarding a platform-plug roundup for being long.
+    # model-generated.
     spoken = ["Good morning. Here's what came in overnight."]
-    for grp in groups[:max_groups]:
-        cands = [ordered[i] for i in grp]
-        pool = [it for it in cands if not _looks_promo(it["text"])] or cands[:1]
-        rep = max(pool, key=lambda it: len(it["text"]))
+    for grp in groups:
+        rep = _representative([ordered[i] for i in grp])
         line = _for_speech(_strip_noise_lines(rep["text"]))
         if line:
             spoken.append(line.rstrip(".") + ".")
     return "\n".join(spoken) if len(spoken) > 1 else None
-
-
-def _parse_groups(raw, n):
-    """Pull a list-of-lists of valid message indices out of the model's JSON.
-
-    Returns None when the output is unusable (caller falls back to the digest),
-    or a list — possibly EMPTY, which means the model decided nothing qualifies.
-    The caller treats those two cases very differently."""
-    try:
-        data = json.loads(raw)
-    except Exception:
-        m = re.search(r"\[.*\]", raw, re.DOTALL)      # salvage JSON from any wrapper
-        if not m:
-            return None
-        try:
-            data = json.loads(m.group(0))
-        except Exception:
-            return None
-    if isinstance(data, dict):                        # tolerate {"groups": [...]}
-        data = next((v for v in data.values() if isinstance(v, list)), None)
-    if not isinstance(data, list):
-        return None
-    groups, seen = [], set()
-    for grp in data:
-        ids = grp if isinstance(grp, list) else [grp]
-        clean = []
-        for x in ids:
-            try:
-                i = int(x)
-            except (TypeError, ValueError):
-                continue
-            if 0 <= i < n and i not in seen:          # valid + not already used
-                seen.add(i)
-                clean.append(i)
-        if clean:
-            groups.append(clean)
-    if data and not groups:
-        return None      # it named messages but none were valid — don't trust it
-    return groups
 
 
 def speak(text, path, say_voice="", rate=None):
@@ -680,23 +729,16 @@ async def run_check(cfg):
     else:
         report(True, "say voice: system default")
 
-    # --- Ollama (only if the AI summary is on) ---
+    # --- Apple's on-device model (only if the AI summary is on) ---
     summary_cfg = cfg.get("summary", {})
     if summary_cfg.get("enabled", True):
-        host = summary_cfg.get("ollama_host", "http://127.0.0.1:11434").rstrip("/")
-        model = summary_cfg.get("model", "gemma2:9b")
-        up = _ollama_ready(host, 5)
-        report(up, f"Ollama server at {host}",
-               "start Ollama (brew services start ollama), or set [summary] enabled = false")
-        if up:
-            try:
-                with urllib.request.urlopen(f"{host}/api/tags", timeout=5) as resp:
-                    tags = json.loads(resp.read())
-                names = [m.get("name", "") for m in tags.get("models", [])]
-                report(any(nm == model or nm.split(":")[0] == model for nm in names),
-                       f'Ollama model "{model}" is pulled', f"run:  ollama pull {model}")
-            except Exception as e:
-                report(False, "could not list Ollama models", str(e))
+        if not APPLE_LLM.exists():
+            report(False, "Apple model helper (apple_llm) is built", "run:  ./setup.sh")
+        else:
+            proc = subprocess.run([str(APPLE_LLM), "--check"], capture_output=True)
+            report(proc.returncode == 0, "Apple Intelligence model is available",
+                   "turn on Apple Intelligence in System Settings and let it finish "
+                   "downloading, or set [summary] enabled = false")
     else:
         report(True, "AI summary disabled — rule-based digest will be used")
 

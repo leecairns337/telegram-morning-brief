@@ -8,8 +8,8 @@ Every morning you get two messages:
 1. 🎧 an **audio brief** — a voice reading the overnight stories that matter
 2. 🔎 a **Sources** message — every item with a tappable link to the original post
 
-**Free and private.** The AI that picks the stories (Ollama) and the voice
-(macOS `say`) both run locally on the Mac. Nothing is sent to any cloud
+**Free and private.** The AI that picks the stories (Apple Intelligence's
+on-device model) and the voice (macOS `say`) both run locally on the Mac. Nothing is sent to any cloud
 service except Telegram itself. No paid APIs, no subscriptions.
 
 By default the AI runs in **extractive** mode: it only *selects and groups*
@@ -43,10 +43,12 @@ free and takes two minutes:
 
 ## Step 2 — Install (on the Mac that will run it)
 
-Requirements: a Mac that stays **plugged in overnight**, Python 3, and
-optionally [Ollama](https://ollama.com) for the AI story selection
-(`brew install ollama && brew services start ollama && ollama pull gemma2:9b`
-— skip it and you get a rule-based headline digest instead).
+Requirements: a Mac that stays **plugged in overnight**, Python 3, and for
+the AI story selection an Apple silicon Mac on macOS 26 or later with **Apple
+Intelligence switched on** (System Settings > Apple Intelligence & Siri), plus
+the Xcode command line tools (`xcode-select --install`) so setup can build the
+small helper that talks to it. Without those you get a rule-based headline
+digest instead.
 
 ```bash
 git clone https://github.com/leecairns337/telegram-morning-brief

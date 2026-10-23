@@ -3,6 +3,9 @@ config.toml
 *.session
 *.session-journal
 
+# Built by setup.sh from apple_llm.swift
+apple_llm
+
 # Generated at runtime
 brief.m4a
 brief.mp3
