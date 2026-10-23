@@ -43,12 +43,20 @@ free and takes two minutes:
 
 ## Step 2 — Install (on the Mac that will run it)
 
-Requirements: a Mac that stays **plugged in overnight**, Python 3, and for
-the AI story selection an Apple silicon Mac on macOS 26 or later with **Apple
-Intelligence switched on** (System Settings > Apple Intelligence & Siri), plus
-the Xcode command line tools (`xcode-select --install`) so setup can build the
-small helper that talks to it. Without those you get a rule-based headline
-digest instead.
+### Minimum requirements
+
+- **A Mac with Apple silicon** (M1 or later). Intel Macs can't run Apple
+  Intelligence.
+- **macOS 27 or later.**
+- **Apple Intelligence switched on** (System Settings > Apple Intelligence &
+  Siri), with its model finished downloading. It picks the stories, on the Mac.
+- **Xcode command line tools** (`xcode-select --install`), so setup can build
+  the small helper that talks to Apple's model.
+- **Python 3** (comes with the command line tools).
+- The Mac stays **plugged in overnight**.
+
+If Apple Intelligence is off or unavailable, the brief still goes out as a
+rule-based headline digest.
 
 ```bash
 git clone https://github.com/leecairns337/telegram-morning-brief
@@ -80,6 +88,7 @@ From then on it runs itself every morning. Health-check it any time with:
 | `[summary] focus` | Topic areas that count as news — everything else is filtered out |
 | `[summary] mode` | `"extractive"` (verbatim, can't fabricate) or `"synthesis"` (prose, can err) |
 | `[voice] say_voice` | Any installed macOS voice — Enhanced/Premium ones sound best |
+| `[voice] russian_voice` | The voice for any Russian text in a message (blank = the built-in Milena) |
 | `[alerts]` | A username to ping if a morning ever fails, a per-machine name, and an optional daily success heartbeat (`daily_heartbeat`) |
 
 Full walkthrough, voice tips and troubleshooting: **[SETUP.md](SETUP.md)**.

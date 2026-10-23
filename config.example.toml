@@ -36,8 +36,9 @@ russian_voice = ""
 
 [summary]
 # AI summary by Apple's on-device model (Apple Intelligence: free, runs on this
-# Mac, nothing leaves it). Needs Apple Intelligence switched on in System
-# Settings, and the small apple_llm helper that ./setup.sh builds. If the model
+# Mac, nothing leaves it). Needs an Apple silicon Mac on macOS 27 or later with
+# Apple Intelligence switched on in System Settings, and the small apple_llm
+# helper that ./setup.sh builds. If the model
 # isn't available, the brief falls back to the rule-based [digest] below.
 # Set enabled = false to skip the AI entirely.
 enabled       = true
