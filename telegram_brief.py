@@ -164,6 +164,25 @@ def _strip_symbols(s):
     )
 
 
+def _strip_foreign_script(s):
+    """Drop words in non-Latin scripts (Cyrillic, Arabic, Hebrew, CJK ...). The
+    channels post in English, but some sign off in Russian ("Новости России,
+    Военные Сводки"), which the English voice reads as gibberish. Names in the
+    stories themselves already arrive in Latin letters. Punctuation left
+    dangling by a removed run ("Summary , .") is tidied up too."""
+    out = "".join(
+        ch for ch in s
+        if not ch.isalpha() or "LATIN" in unicodedata.name(ch, "LATIN")
+    )
+    if out == s:
+        return s
+    out = re.sub(r"[ \t]+([,.;:])", r"\1", out)       # space before punctuation
+    out = re.sub(r"([,;:])(?:\s*[,;:.])+", r"\1", out)  # runs of leftover separators
+    out = re.sub(r"(?m)^[\s,;:.]+$", "", out)          # lines left as bare punctuation
+    out = re.sub(r"[,;:]\s*$", "", out)                # trailing separator
+    return out
+
+
 def _for_speech(s):
     """Tidy a snippet for the TTS voice: strip markdown links, URLs, hashtags,
     stray markdown punctuation and emoji, then collapse whitespace."""
@@ -172,6 +191,7 @@ def _for_speech(s):
     s = re.sub(r"https?://\S+", "", s)               # bare URLs
     s = re.sub(r"#\w+", "", s)                       # hashtags, word and all
     s = _strip_symbols(s)                            # emoji + all symbol chars
+    s = _strip_foreign_script(s)                     # "Новости России" signatures etc.
     s = re.sub(r"[*_`#>]+", "", s)                   # markdown emphasis/heading marks
     # Wire-service urgency stamps are noise by the time the brief is read.
     # (After the markdown strip, so "**BREAKING**" is caught too.)
@@ -570,7 +590,7 @@ def summarize_local(items, summary_cfg):
     if not groups:
         return "Good morning. Nothing of note came in overnight."
     stories = [_representative([ordered[i] for i in grp]) for grp in groups]
-    lines = [f"[{it['channel']} {it['time']}] {_for_speech(_strip_noise_lines(it['text']))}"
+    lines = [f"[{it['channel']} {it['time']}] {_story_text(it)}"
              for it in stories]
     # Most important first, so if it's too long for the model drop from the END.
     while lines:
@@ -640,6 +660,15 @@ def _strip_noise_lines(text):
     return out if out else text
 
 
+def _story_text(it):
+    """A message tidied for reading aloud as a story: noise lines and symbols
+    removed, and the channel's own name dropped when it signs off with it
+    ("... Peskov said. Military Summary")."""
+    text = _for_speech(_strip_noise_lines(it["text"]))
+    channel = re.escape(str(it["channel"]))
+    return re.sub(rf"[\s.,;:|-]*\b{channel}\W*$", "", text, flags=re.IGNORECASE).strip()
+
+
 def select_relevant(items, summary_cfg):
     """Quote-only mode: the model SELECTS and GROUPS real messages; we then
     read the actual message text. The model writes no prose, so it cannot
@@ -660,7 +689,7 @@ def select_relevant(items, summary_cfg):
     spoken = ["Good morning. Here's what came in overnight."]
     for grp in groups:
         rep = _representative([ordered[i] for i in grp])
-        line = _for_speech(_strip_noise_lines(rep["text"]))
+        line = _story_text(rep)
         if line:
             spoken.append(line.rstrip(".") + ".")
     return "\n".join(spoken) if len(spoken) > 1 else None
